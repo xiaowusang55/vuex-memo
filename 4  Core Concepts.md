@@ -107,7 +107,7 @@ computed: {
 }
 ```
 
-## Components Can Still hava Local State
+### Components Can Still hava Local State
 
 Using Vuex doesn't mean you should put all the state in Vuex. Although putting more state into Vuex makes your state mutations more explicit and debuggable, sometimes it could also make the code more verbose and indirect. If a piece of state strictly belongs to a single component, it could be just fine leaving it as local state. You should weigh the trade-offs and make decisions that fit the development needs of your app.
 
@@ -233,3 +233,352 @@ If you want to map a getter to a different name, use an object:
 })
 
 ```
+
+## Mutations
+
+The only way to actually change state in a Vuex store is by committing a mutation. Vuex mutations are very similar to events: each mutation has a string type and a handler. The handler function is where we perform actual state modifications, and it will receive the state as the first argument:
+
+```js
+const store = new Vuex.Store({
+    state: {
+        count: 1
+    },
+    mutations: {
+        increment (state) {
+            //mutate state
+            state.count++
+        }
+    }
+})
+```
+
+You cannot directly call a mutation handler. Think of it more like event registration: "When a mutation with type `increment` is triggered, call this handler." To invoke a mutation handler, you need to call `store.commit` with its type:
+
+```js
+store.commit('increment')
+```
+
+### Commit with Payload
+
+You can pass an additional argument to `store.commit`, which is called the **payload** for the mutation:
+
+```js
+//...
+mutations: {
+    increment (state, n) {
+        state.count += n
+    }
+}
+```
+
+```js
+store.commit('increment', 10)
+```
+
+In most cases, the payload should be an object so that it can contain multiple fields, and the recorded mutation will also be more descriptive:
+
+```js
+//...
+mutations: {
+    increment (state, payload) {
+        state.count += payload.amount
+    }
+}
+```
+
+```js
+store.commit('increment', {
+    amount: 10
+})
+```
+
+### Object-Style Commit
+
+An alternative way to commit a mutation is by directly using an object that has a `type` property:
+
+```js
+store.commit({
+    type:'increment',
+    amount: 10
+})
+```
+
+When using object-style commit, the entire object will be passed as the payload to mutation handlers, so the handler remains the same:
+
+```js
+mutations: {
+    increment (state, payload) {
+        state.count += payload.amount
+    }
+}
+```
+
+### Mutations Follow Vue's Reactivity Rules
+
+Since a Vuex store's state is made reactive by Vue, when we mutate the state, Vue components observing the state will update automatically. This also means Vuex mutations are subject to the same reactivity caveats when working with plain Vue:
+
+* Prefer initializing your store's initial state with all desired fields upfront.
+* When adding new properties to an Object, you should either:
+
+1. Use Vue.set(obj, 'newProp', 123), or
+2. Replace that Object with a fresh one. For example, using the object spread syntax we can write it like this:
+
+```js
+state.obj = {
+    ...state.obj, newProp: 123
+}
+```
+
+### Using Constants for Mutation Types
+
+```js
+//mutation-types.js
+export const SOME_MUTATION = 'SOME_MUTATION'
+```
+
+```js
+import Vuex from 'vuex'
+import { SOME_MUTATION } from './mutation-types'
+
+const store = new Vuex.Store({
+    state: {...},
+    mutations: {
+        // we can use the ES2015 computed property name feature
+        // to use a constant as the function name
+        [SOME_MUTATION] (state) {
+            //mutate state
+        }
+
+    }
+})
+```
+
+Whether to use constants is largely a preference - it can be helpful in large projects with many developers, but it's totally optional if you don't like them.
+
+### Mutations Must Be Synchronous
+
+One important rule to remember is that **mutation handler functions must be synchronous**. Why? Consider the following example:
+
+```js
+mutations: {
+    someMutation (state) {
+        api.callAsyncMethod(() => {
+            state.count++
+        })
+    }
+}
+```
+
+Now imagine we are debugging the app and looking at the devtool's mutation logs. For every mutation logged, the devtool will need to capture a "before" and "after" snapshots of the state. However, the asynchronous callback inside the example mutation above makes that impossible: the callback is not called yet when the mutation is committed, and there's no way for the devtool to know when the callback will actually be called - any state mutation performed in the callback is essentially un-trackable
+
+### Committing Mutations in Components
+
+```js
+import { mapMutation } from 'vuex'
+
+export default {
+    methods: {
+        ...mapMutations({
+            'increment' // map `this.increment()` to `this.$store.commit('increment')`,
+
+             // `mapMutations` also supports payloads:
+            'incrementBy' // map `this.incrementBy(amount)` to `this.$store.commit('incrementBy', amount)`
+        }),
+        ...mapMutations({
+            add: 'increment' //map `this.add()` to `this.$store.commit('increment')`
+        })
+    }
+}
+```
+
+### On to Actions
+
+Asynchronicity combined with state mutation can make your program very hard to reason about. For example, when you call two methods both with async callbacks that mutate the state, how do you know when they are called and which callback was called first? This is exactly why we want to separate the two concepts. In Vuex, **mutations are synchronous transactions:**
+
+```js
+store.commit('increment')
+// any state change that the "increment" mutation may cause
+// should be done at this moment.
+```
+
+To handle **asynchronous** operations, let's introduce **Actions**.
+
+## Actions
+
+Actions are similar to mutations, the differences being that:
+
+* Instead of mutating the state, actions commit mutations.
+* Actions can contain arbitrary asynchronous operations.
+
+Let's register a simple action:
+
+```js
+const store = Vuex.Store({
+    state: {
+        count: 0
+    },
+    mutations: {
+        increment (state) {
+            state.count++
+        }
+    },
+    actions: {
+        increment (context) {
+            context.commit('increment')
+        }
+    }
+})
+```
+
+Action handlers receive a context object which exposes the same set of methods/properties on the store instance, so you can call `context.commit` to commit a mutation, or access the state and getters via `context.state` and `context.getters`. We can even call other actions with `context.dispatch`. We will see why this context object is not the store instance itself when we introduce **Modules** later.
+
+In practice, we often use ES2015 argument destructuring to simplify the code a bit (especially when we need to call `commit` multiple times):
+
+```js
+actions: {
+    increment ({ commit }) {
+        commit('increment')
+    }
+}
+```
+
+### Dispatching Actions
+
+Actions are triggered with the `store.dispatch` method:
+
+```js
+store.dispatch('increment')
+```
+
+his may look silly at first sight: if we want to increment the count, why don't we just call `store.commit('increment')` directly? Remember that **mutations have to be synchronous?** Actions don't. We can perform **asynchronous** operations inside an action:
+
+```js
+actions: {
+    incrementAsync ({ commit }) {
+        setTimeout(() => {
+            commit('increment')
+        }, 1000)
+    }
+}
+```
+
+Actions support the same payload format and object-style dispatch:
+
+```js
+
+//dispatch with a payload
+store.dispatch('incrementAsync', {
+    mount: 10
+})
+// dispatch with an object
+store.dispatch({
+    type: 'incrementAsync',
+    amount: 10
+})
+```
+
+A more practical example of real-world actions would be an action to checkout a shopping cart, which involves **calling an async API and committing multiple mutations:**
+
+```js
+actions: {
+  checkout ({ commit, state }, products) {
+    // save the items currently in the cart
+    const savedCartItems = [...state.cart.added]
+    // send out checkout request, and optimistically
+    // clear the cart
+    commit(types.CHECKOUT_REQUEST)
+    // the shop API accepts a success callback and a failure callback
+    shop.buyProducts(
+      products,
+      // handle success
+      () => commit(types.CHECKOUT_SUCCESS),
+      // handle failure
+      () => commit(types.CHECKOUT_FAILURE, savedCartItems)
+    )
+  }
+}
+```
+
+Note we are performing a flow of asynchronous operations, and recording the side effects (state mutations) of the action by committing them.
+
+### Dispatching Actions in Components
+
+You can dispatch actions in components with `this.$store.dispatch('xxx')`, or use the `mapActions` helper which maps component methods to `store.dispatch` calls (requires root `store` injection):
+
+```js
+import { mapActions } from 'vuex'
+
+export default {
+    //...
+    methods: {
+        ...mapActions([
+            'increment', // map `this.increment()` to `this.$store.dispatc('increment')`
+            // `mapActions` also supports payloads:
+            'incrementBy' // map `this.incrementBy(amount)` to `this.$store.dispatch('incrementBy'
+        ]),
+        ...mapActions({
+        add: 'increment' // map `this.add()` to `this.$store.dispatch('increment')`
+    }
+}
+```
+
+## Composing Actions
+
+Actions are often asynchronous, so how do we know when an action is done? And more importantly, how can we compose multiple actions together to handle more complex async flows?
+
+The first thing to know is that `store.dispatch` can handle Promise returned by the triggered action handler and it also returns Promise:
+
+```js
+actions: {
+    actions({ commit }) {
+        return new Promise((resolve, reject) => {
+            setTimeout(() => {
+                commit('someMutation')
+                resolve()
+            }, 1000)
+        })
+    }
+}
+```
+
+Now you can do:
+
+```js
+store.dispatch('actionA').then(() => {
+    //...
+})
+```
+
+And also in another action:
+
+```js
+actions: {
+  // ...
+  actionB ({ dispatch, commit }) {
+    return dispatch('actionA').then(() => {
+      commit('someOtherMutation')
+    })
+  }
+}
+
+```
+
+Finally, if we make use of async / await , we can compose our actions like this:
+
+```js
+// assuming `getData()` and `getOtherData()` return Promises
+
+actions: {
+  async actionA ({ commit }) {
+    commit('gotData', await getData())
+  },
+  async actionB ({ dispatch, commit }) {
+    await dispatch('actionA') // wait for `actionA` to finish
+    commit('gotOtherData', await getOtherData())
+  }
+}
+
+```
+
+>It's possible for a store.dispatch to trigger multiple action handlers in different modules. In such a case the returned value will be a Promise that resolves when all triggered handlers have been resolved.
+
