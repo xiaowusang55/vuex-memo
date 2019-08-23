@@ -1,2 +1,3 @@
-# vuex-memo
-### vuex-memo
+# Vuex-memo
+
+## vuex-memo
