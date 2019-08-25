@@ -61,7 +61,7 @@
         }
 
 
-        new Vue({
+        let vm = new Vue({
             el: '#app',
             store,
             components: {
@@ -74,7 +74,7 @@
 
 
 
-        console.log(store.getters.doneTodos);
+        console.log(vm);
     </script>
 
 
